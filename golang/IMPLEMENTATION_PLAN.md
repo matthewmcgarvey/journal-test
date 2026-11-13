@@ -15,8 +15,14 @@ Build a small Go API service in a PostgreSQL-backed proof-of-concept that journa
 - `internal/config`: environment configuration
 - `internal/db`: connection and migration logic
 - `internal/api`: HTTP handlers and routing
-- `internal/domain`: domain structs and validation helpers
+- `internal/service`: application operations, defaults, and business validation
+- `internal/repository`: PostgreSQL queries and transaction handling
+- `internal/domain`: domain models and shared error types
 - `migrations`: SQL migration files
+
+Keep HTTP handlers focused on decoding requests, calling the service, and
+translating results into HTTP responses. The service owns application-level
+rules; the repository owns SQL and atomic database operations.
 
 ## Step 1: Bootstrap the service
 - Create the Go module and dependency set
@@ -98,7 +104,7 @@ Rules:
 The key correctness requirement is the transfer transaction.
 
 Inside one DB transaction:
-1. Lock affected tracked accounts in deterministic order
+1. Lock affected account rows in deterministic order
 2. Read the latest account balances while locks are held
 3. Validate insufficient-funds rules
 4. Insert transfer row

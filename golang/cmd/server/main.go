@@ -7,6 +7,8 @@ import (
 	"accounting-service/internal/api"
 	"accounting-service/internal/config"
 	"accounting-service/internal/db"
+	"accounting-service/internal/repository"
+	"accounting-service/internal/service"
 )
 
 func main() {
@@ -22,7 +24,8 @@ func main() {
 	}
 	defer dbConn.Close()
 
-	r := api.NewRouter(dbConn)
+	accountingService := service.New(repository.NewPostgres(dbConn))
+	r := api.NewRouter(accountingService)
 	addr := ":" + strconv.Itoa(cfg.Port)
 	log.Printf("starting accounting API on %s", addr)
 	if err := r.Run(addr); err != nil {
