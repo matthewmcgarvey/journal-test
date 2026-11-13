@@ -1,4 +1,4 @@
-import accounting_api/model
+import accounting_domain/model
 import gleam/bit_array
 import gleam/dynamic.{type Dynamic}
 import gleam/dynamic/decode
@@ -7,18 +7,23 @@ import gleam/io
 import gleam/json
 import wisp
 
+pub type RequestError {
+  MissingWrapper
+  InvalidRequest(String)
+}
+
 pub fn wrapped_value(
   body: String,
   wrapper: String,
-) -> Result(Dynamic, model.ApiError) {
+) -> Result(Dynamic, RequestError) {
   case json.parse(body, decode.dynamic) {
-    Error(_) -> Error(model.InvalidInput("request body must be valid JSON"))
+    Error(_) -> Error(InvalidRequest("request body must be valid JSON"))
     Ok(value) ->
       case
         decode.run(value, decode.field(wrapper, decode.dynamic, decode.success))
       {
         Ok(wrapped) -> Ok(wrapped)
-        Error(_) -> Error(model.MissingWrapper)
+        Error(_) -> Error(MissingWrapper)
       }
   }
 }
@@ -37,7 +42,7 @@ pub fn with_body(
   }
 }
 
-pub fn parse_id(value: String) -> Result(Int, model.ApiError) {
+pub fn parse_id(value: String) -> Result(Int, model.DomainError) {
   case int.parse(value) {
     Ok(id) if id > 0 -> Ok(id)
     _ -> Error(model.NotFound)
@@ -52,9 +57,15 @@ pub fn json_error(status: Int, message: String) -> wisp.Response {
   json_response(status, json.object([#("error", json.string(message))]))
 }
 
-pub fn error_response(error: model.ApiError) -> wisp.Response {
+pub fn request_error_response(error: RequestError) -> wisp.Response {
   case error {
-    model.MissingWrapper -> json_error(400, "missing required JSON wrapper")
+    MissingWrapper -> json_error(400, "missing required JSON wrapper")
+    InvalidRequest(message) -> json_error(422, message)
+  }
+}
+
+pub fn error_response(error: model.DomainError) -> wisp.Response {
+  case error {
     model.InvalidInput(message) -> json_error(422, message)
     model.NotFound -> json_error(404, "not found")
     model.Conflict -> json_error(409, "external_id already exists")

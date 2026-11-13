@@ -49,6 +49,12 @@ Request errors return JSON: `400` for a missing wrapper, `404` for a missing
 account or transfer, `409` for a duplicate external ID, and `422` for invalid
 input or insufficient tracked balance.
 
+## Structure
+
+- `src/accounting_api/` contains routing, resource handlers, and JSON codecs.
+- `src/accounting_domain/` contains domain types, database setup, and
+  resource-specific repositories.
+
 ## Development
 
 ```sh

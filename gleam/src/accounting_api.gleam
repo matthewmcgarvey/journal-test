@@ -1,5 +1,5 @@
-import accounting_api/database
 import accounting_api/router
+import accounting_domain/database
 import envoy
 import gleam/erlang/process
 import gleam/int

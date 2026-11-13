@@ -1,6 +1,6 @@
+import accounting_api/codec
 import accounting_api/http as api_http
-import accounting_api/model
-import accounting_api/transfers_repository
+import accounting_domain/transfers_repository
 import gleam/dynamic/decode
 import gleam/http.{Get, Post}
 import gleam/json
@@ -26,7 +26,7 @@ fn index(connection: pog.Connection) -> wisp.Response {
     Ok(transfers) ->
       api_http.json_response(
         200,
-        json.object([#("transfers", json.array(transfers, model.transfer_json))]),
+        json.object([#("transfers", json.array(transfers, codec.transfer_json))]),
       )
     Error(error) -> api_http.error_response(error)
   }
@@ -40,7 +40,7 @@ fn show(id: String, connection: pog.Connection) -> wisp.Response {
         Ok(transfer) ->
           api_http.json_response(
             200,
-            json.object([#("transfer", model.transfer_json(transfer))]),
+            json.object([#("transfer", codec.transfer_json(transfer))]),
           )
         Error(error) -> api_http.error_response(error)
       }
@@ -49,16 +49,16 @@ fn show(id: String, connection: pog.Connection) -> wisp.Response {
 
 fn create(body: String, connection: pog.Connection) -> wisp.Response {
   case api_http.wrapped_value(body, "transfer") {
-    Error(error) -> api_http.error_response(error)
+    Error(error) -> api_http.request_error_response(error)
     Ok(value) ->
-      case decode.run(value, model.new_transfer_decoder()) {
+      case decode.run(value, codec.new_transfer_decoder()) {
         Error(_) -> api_http.json_error(422, "invalid transfer")
         Ok(new_transfer) ->
           case transfers_repository.create_transfer(connection, new_transfer) {
             Ok(transfer) ->
               api_http.json_response(
                 201,
-                json.object([#("transfer", model.transfer_json(transfer))]),
+                json.object([#("transfer", codec.transfer_json(transfer))]),
               )
             Error(error) -> api_http.error_response(error)
           }

@@ -1,14 +1,17 @@
-import accounting_api/model.{
-  type Account, type ApiError, type NewAccount, Account, Database, InvalidInput,
+import accounting_domain/model.{
+  type Account, type DomainError, type NewAccount, Account, Database,
+  InvalidInput,
 }
-import accounting_api/repository
+import accounting_domain/repository
 import gleam/dynamic/decode
 import gleam/option.{None, Some}
 import gleam/result
 import gleam/string
 import pog
 
-pub fn accounts(connection: pog.Connection) -> Result(List(Account), ApiError) {
+pub fn accounts(
+  connection: pog.Connection,
+) -> Result(List(Account), DomainError) {
   repository.run(
     connection,
     "SELECT a.id, a.external_id, a.track_balance, a.created_at::text,
@@ -31,7 +34,7 @@ pub fn accounts(connection: pog.Connection) -> Result(List(Account), ApiError) {
 pub fn account(
   connection: pog.Connection,
   id: Int,
-) -> Result(Account, ApiError) {
+) -> Result(Account, DomainError) {
   case
     repository.run(
       connection,
@@ -58,7 +61,7 @@ pub fn account(
 pub fn create_account(
   connection: pog.Connection,
   new_account: NewAccount,
-) -> Result(Account, ApiError) {
+) -> Result(Account, DomainError) {
   case string.trim(new_account.external_id) {
     "" -> Error(InvalidInput("external_id must not be empty"))
     _ ->

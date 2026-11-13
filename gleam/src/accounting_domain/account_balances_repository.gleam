@@ -1,12 +1,14 @@
-import accounting_api/model.{type AccountBalance, type ApiError, AccountBalance}
-import accounting_api/repository
+import accounting_domain/model.{
+  type AccountBalance, type DomainError, AccountBalance,
+}
+import accounting_domain/repository
 import gleam/dynamic/decode
 import gleam/result
 import pog
 
 pub fn account_balances(
   connection: pog.Connection,
-) -> Result(List(AccountBalance), ApiError) {
+) -> Result(List(AccountBalance), DomainError) {
   repository.run(
     connection,
     "SELECT id, account_id, running_balance, created_at::text

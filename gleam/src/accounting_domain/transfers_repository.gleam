@@ -1,8 +1,8 @@
-import accounting_api/model.{
-  type ApiError, type NewTransfer, type Transfer, InsufficientFunds,
+import accounting_domain/model.{
+  type DomainError, type NewTransfer, type Transfer, InsufficientFunds,
   InvalidInput, Transfer,
 }
-import accounting_api/repository
+import accounting_domain/repository
 import gleam/dynamic/decode
 import gleam/result
 import gleam/string
@@ -14,7 +14,7 @@ type AccountLock {
 
 pub fn transfers(
   connection: pog.Connection,
-) -> Result(List(Transfer), ApiError) {
+) -> Result(List(Transfer), DomainError) {
   repository.run(
     connection,
     "SELECT id, external_id, debit_account_id, credit_account_id, amount,
@@ -30,7 +30,7 @@ pub fn transfers(
 pub fn transfer(
   connection: pog.Connection,
   id: Int,
-) -> Result(Transfer, ApiError) {
+) -> Result(Transfer, DomainError) {
   case
     repository.run(
       connection,
@@ -50,7 +50,7 @@ pub fn transfer(
 pub fn create_transfer(
   connection: pog.Connection,
   new_transfer: NewTransfer,
-) -> Result(Transfer, ApiError) {
+) -> Result(Transfer, DomainError) {
   case validate_transfer(new_transfer) {
     Error(error) -> Error(error)
     Ok(Nil) ->
@@ -63,7 +63,7 @@ pub fn create_transfer(
 fn create_transfer_transaction(
   connection: pog.Connection,
   new_transfer: NewTransfer,
-) -> Result(Transfer, ApiError) {
+) -> Result(Transfer, DomainError) {
   use locked_accounts <- result.try(repository.run(
     connection,
     "SELECT id, track_balance
@@ -121,7 +121,7 @@ fn create_transfer_transaction(
   }
 }
 
-fn validate_transfer(transfer: NewTransfer) -> Result(Nil, ApiError) {
+fn validate_transfer(transfer: NewTransfer) -> Result(Nil, DomainError) {
   let external_id = string.trim(transfer.external_id)
   case True {
     _ if external_id == "" ->
@@ -139,7 +139,7 @@ fn validate_transfer(transfer: NewTransfer) -> Result(Nil, ApiError) {
 fn insert_transfer(
   connection: pog.Connection,
   transfer: NewTransfer,
-) -> Result(Transfer, ApiError) {
+) -> Result(Transfer, DomainError) {
   case
     repository.run(
       connection,
@@ -173,7 +173,7 @@ fn insert_entry(
   account_id: Int,
   amount: Int,
   debit: Bool,
-) -> Result(Nil, ApiError) {
+) -> Result(Nil, DomainError) {
   repository.run(
     connection,
     "INSERT INTO entries (account_id, transfer_id, amount, debit)
@@ -193,7 +193,7 @@ fn write_balance(
   connection: pog.Connection,
   account: AccountLock,
   running_balance: Int,
-) -> Result(Nil, ApiError) {
+) -> Result(Nil, DomainError) {
   case account.track_balance {
     False -> Ok(Nil)
     True ->
@@ -211,7 +211,7 @@ fn write_balance(
 fn balance_for(
   connection: pog.Connection,
   account: AccountLock,
-) -> Result(Int, ApiError) {
+) -> Result(Int, DomainError) {
   case account.track_balance {
     False -> Ok(0)
     True ->
@@ -240,7 +240,7 @@ fn balance_for(
 fn find_locked_account(
   accounts: List(AccountLock),
   id: Int,
-) -> Result(AccountLock, ApiError) {
+) -> Result(AccountLock, DomainError) {
   case accounts {
     [account, ..remaining] ->
       case account.id == id {

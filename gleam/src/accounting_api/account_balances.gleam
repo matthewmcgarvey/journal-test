@@ -1,6 +1,6 @@
-import accounting_api/account_balances_repository
+import accounting_api/codec
 import accounting_api/http as api_http
-import accounting_api/model
+import accounting_domain/account_balances_repository
 import gleam/http.{Get}
 import gleam/json
 import pog
@@ -25,7 +25,7 @@ fn index(connection: pog.Connection) -> wisp.Response {
         json.object([
           #(
             "account_balances",
-            json.array(balances, model.account_balance_json),
+            json.array(balances, codec.account_balance_json),
           ),
         ]),
       )
