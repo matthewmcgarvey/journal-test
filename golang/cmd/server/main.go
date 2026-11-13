@@ -16,7 +16,13 @@ func main() {
 		log.Fatalf("database migrations failed: %v", err)
 	}
 
-	r := api.NewRouter()
+	dbConn, err := db.Connect(cfg)
+	if err != nil {
+		log.Fatalf("database connection failed: %v", err)
+	}
+	defer dbConn.Close()
+
+	r := api.NewRouter(dbConn)
 	addr := ":" + strconv.Itoa(cfg.Port)
 	log.Printf("starting accounting API on %s", addr)
 	if err := r.Run(addr); err != nil {
