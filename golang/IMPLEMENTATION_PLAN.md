@@ -7,6 +7,7 @@ Build a small Go API service in a PostgreSQL-backed proof-of-concept that journa
 - HTTP framework: Gin
 - Database driver: pgx via `database/sql`
 - Migrations: `golang-migrate/migrate` with SQL migration files
+- SQL generation: sqlc v1.29.0
 - Local database runtime: Docker Compose for PostgreSQL
 
 ## High-level architecture
@@ -16,13 +17,17 @@ Build a small Go API service in a PostgreSQL-backed proof-of-concept that journa
 - `internal/db`: connection and migration logic
 - `internal/api`: HTTP handlers and routing
 - `internal/service`: application operations, defaults, and business validation
-- `internal/repository`: PostgreSQL queries and transaction handling
+- `internal/repository/queries`: hand-written SQL query definitions
+- `internal/repository/db`: sqlc-generated query methods and models
+- `internal/repository`: transaction handling and domain mapping around generated queries
 - `internal/domain`: domain models and shared error types
 - `migrations`: SQL migration files
 
 Keep HTTP handlers focused on decoding requests, calling the service, and
 translating results into HTTP responses. The service owns application-level
-rules; the repository owns SQL and atomic database operations.
+rules; the repository owns atomic database operations and uses sqlc-generated
+methods for SQL defined in `internal/repository/queries`. Run `make sqlc` after
+changing a query or schema.
 
 ## Step 1: Bootstrap the service
 - Create the Go module and dependency set

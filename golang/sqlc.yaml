@@ -1,0 +1,15 @@
+version: "2"
+sql:
+  - engine: "postgresql"
+    queries: "internal/repository/queries"
+    schema:
+      - "migrations/001_create_accounts.up.sql"
+      - "migrations/002_create_transfers.up.sql"
+      - "migrations/003_create_entries.up.sql"
+      - "migrations/004_create_account_balances.up.sql"
+    gen:
+      go:
+        package: "db"
+        out: "internal/repository/db"
+        sql_package: "database/sql"
+        emit_json_tags: true

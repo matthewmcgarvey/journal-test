@@ -5,69 +5,53 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"time"
 
 	"accounting-service/internal/domain"
+	sqlcdb "accounting-service/internal/repository/db"
 
 	"github.com/jackc/pgx/v5/pgconn"
 )
 
 type Postgres struct {
-	db *sql.DB
+	db      *sql.DB
+	queries *sqlcdb.Queries
 }
 
 func NewPostgres(db *sql.DB) *Postgres {
-	return &Postgres{db: db}
+	return &Postgres{
+		db:      db,
+		queries: sqlcdb.New(db),
+	}
 }
 
 func (p *Postgres) ListAccounts(ctx context.Context) ([]domain.Account, error) {
-	rows, err := p.db.QueryContext(ctx, `
-		SELECT a.id, a.external_id, a.track_balance, a.created_at, b.running_balance
-		FROM accounts a
-		LEFT JOIN LATERAL (
-			SELECT running_balance
-			FROM account_balances
-			WHERE account_id = a.id
-			ORDER BY id DESC
-			LIMIT 1
-		) b ON TRUE
-		ORDER BY a.id ASC`)
+	rows, err := p.queries.ListAccounts(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("list accounts: %w", err)
 	}
-	defer rows.Close()
-
-	accounts := make([]domain.Account, 0)
-	for rows.Next() {
-		account, err := scanAccount(rows)
+	accounts := make([]domain.Account, 0, len(rows))
+	for _, row := range rows {
+		account, err := accountFromRow(row.ID, row.ExternalID, row.TrackBalance, row.CreatedAt, row.CurrentBalance, row.HasBalanceSnapshot)
 		if err != nil {
-			return nil, fmt.Errorf("scan account: %w", err)
+			return nil, err
 		}
 		accounts = append(accounts, account)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate accounts: %w", err)
 	}
 	return accounts, nil
 }
 
 func (p *Postgres) GetAccount(ctx context.Context, id int64) (domain.Account, error) {
-	row := p.db.QueryRowContext(ctx, `
-		SELECT a.id, a.external_id, a.track_balance, a.created_at, b.running_balance
-		FROM accounts a
-		LEFT JOIN LATERAL (
-			SELECT running_balance
-			FROM account_balances
-			WHERE account_id = a.id
-			ORDER BY id DESC
-			LIMIT 1
-		) b ON TRUE
-		WHERE a.id = $1`, id)
-	account, err := scanAccount(row)
+	row, err := p.queries.GetAccount(ctx, id)
 	if errors.Is(err, sql.ErrNoRows) {
 		return domain.Account{}, domain.ErrNotFound
 	}
 	if err != nil {
 		return domain.Account{}, fmt.Errorf("get account: %w", err)
+	}
+	account, err := accountFromRow(row.ID, row.ExternalID, row.TrackBalance, row.CreatedAt, row.CurrentBalance, row.HasBalanceSnapshot)
+	if err != nil {
+		return domain.Account{}, err
 	}
 	return account, nil
 }
@@ -79,13 +63,11 @@ func (p *Postgres) CreateAccount(ctx context.Context, externalID string, trackBa
 	}
 	defer tx.Rollback()
 
-	var account domain.Account
-	account.ExternalID = externalID
-	account.TrackBalance = trackBalance
-	err = tx.QueryRowContext(ctx, `
-		INSERT INTO accounts (external_id, track_balance)
-		VALUES ($1, $2)
-		RETURNING id, created_at`, externalID, trackBalance).Scan(&account.ID, &account.CreatedAt)
+	queries := sqlcdb.New(tx)
+	row, err := queries.InsertAccount(ctx, sqlcdb.InsertAccountParams{
+		ExternalID:   externalID,
+		TrackBalance: trackBalance,
+	})
 	if err != nil {
 		if isUniqueViolation(err) {
 			return domain.Account{}, domain.ErrConflict
@@ -93,10 +75,14 @@ func (p *Postgres) CreateAccount(ctx context.Context, externalID string, trackBa
 		return domain.Account{}, fmt.Errorf("insert account: %w", err)
 	}
 
+	account := domain.Account{
+		ID:           int64(row.ID),
+		ExternalID:   row.ExternalID,
+		TrackBalance: row.TrackBalance,
+		CreatedAt:    row.CreatedAt,
+	}
 	if trackBalance {
-		if _, err := tx.ExecContext(ctx, `
-			INSERT INTO account_balances (account_id, running_balance)
-			VALUES ($1, 0)`, account.ID); err != nil {
+		if err := queries.InsertInitialBalance(ctx, row.ID); err != nil {
 			return domain.Account{}, fmt.Errorf("insert initial balance: %w", err)
 		}
 		zero := int64(0)
@@ -110,48 +96,26 @@ func (p *Postgres) CreateAccount(ctx context.Context, externalID string, trackBa
 }
 
 func (p *Postgres) ListTransfers(ctx context.Context) ([]domain.Transfer, error) {
-	rows, err := p.db.QueryContext(ctx, `
-		SELECT id, external_id, debit_account_id, credit_account_id, amount, created_at
-		FROM transfers
-		ORDER BY id ASC`)
+	rows, err := p.queries.ListTransfers(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("list transfers: %w", err)
 	}
-	defer rows.Close()
-
-	transfers := make([]domain.Transfer, 0)
-	for rows.Next() {
-		var transfer domain.Transfer
-		if err := rows.Scan(
-			&transfer.ID, &transfer.ExternalID, &transfer.DebitAccountID,
-			&transfer.CreditAccountID, &transfer.Amount, &transfer.CreatedAt,
-		); err != nil {
-			return nil, fmt.Errorf("scan transfer: %w", err)
-		}
-		transfers = append(transfers, transfer)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate transfers: %w", err)
+	transfers := make([]domain.Transfer, 0, len(rows))
+	for _, row := range rows {
+		transfers = append(transfers, transferFromRow(row))
 	}
 	return transfers, nil
 }
 
 func (p *Postgres) GetTransfer(ctx context.Context, id int64) (domain.Transfer, error) {
-	var transfer domain.Transfer
-	err := p.db.QueryRowContext(ctx, `
-		SELECT id, external_id, debit_account_id, credit_account_id, amount, created_at
-		FROM transfers
-		WHERE id = $1`, id).Scan(
-		&transfer.ID, &transfer.ExternalID, &transfer.DebitAccountID,
-		&transfer.CreditAccountID, &transfer.Amount, &transfer.CreatedAt,
-	)
+	row, err := p.queries.GetTransfer(ctx, id)
 	if errors.Is(err, sql.ErrNoRows) {
 		return domain.Transfer{}, domain.ErrNotFound
 	}
 	if err != nil {
 		return domain.Transfer{}, fmt.Errorf("get transfer: %w", err)
 	}
-	return transfer, nil
+	return transferFromRow(row), nil
 }
 
 func (p *Postgres) CreateTransfer(ctx context.Context, transfer domain.Transfer) (domain.Transfer, error) {
@@ -161,31 +125,17 @@ func (p *Postgres) CreateTransfer(ctx context.Context, transfer domain.Transfer)
 	}
 	defer tx.Rollback()
 
-	rows, err := tx.QueryContext(ctx, `
-		SELECT id, track_balance
-		FROM accounts
-		WHERE id IN ($1, $2)
-		ORDER BY id
-		FOR UPDATE`, transfer.DebitAccountID, transfer.CreditAccountID)
+	queries := sqlcdb.New(tx)
+	accounts, err := queries.LockTransferAccounts(ctx, sqlcdb.LockTransferAccountsParams{
+		DebitAccountID:  transfer.DebitAccountID,
+		CreditAccountID: transfer.CreditAccountID,
+	})
 	if err != nil {
 		return domain.Transfer{}, fmt.Errorf("lock transfer accounts: %w", err)
 	}
-	tracked := make(map[int64]bool, 2)
-	for rows.Next() {
-		var id int64
-		var trackBalance bool
-		if err := rows.Scan(&id, &trackBalance); err != nil {
-			rows.Close()
-			return domain.Transfer{}, fmt.Errorf("scan locked account: %w", err)
-		}
-		tracked[id] = trackBalance
-	}
-	if err := rows.Err(); err != nil {
-		rows.Close()
-		return domain.Transfer{}, fmt.Errorf("iterate locked accounts: %w", err)
-	}
-	if err := rows.Close(); err != nil {
-		return domain.Transfer{}, fmt.Errorf("close locked accounts: %w", err)
+	tracked := make(map[int64]bool, len(accounts))
+	for _, account := range accounts {
+		tracked[int64(account.ID)] = account.TrackBalance
 	}
 	if len(tracked) != 2 {
 		return domain.Transfer{}, domain.ErrNotFound
@@ -196,13 +146,7 @@ func (p *Postgres) CreateTransfer(ctx context.Context, transfer domain.Transfer)
 		if !tracked[accountID] {
 			continue
 		}
-		var balance int64
-		err := tx.QueryRowContext(ctx, `
-			SELECT running_balance
-			FROM account_balances
-			WHERE account_id = $1
-			ORDER BY id DESC
-			LIMIT 1`, accountID).Scan(&balance)
+		balance, err := queries.LatestAccountBalance(ctx, accountID)
 		if errors.Is(err, sql.ErrNoRows) {
 			return domain.Transfer{}, fmt.Errorf("tracked account %d has no balance snapshot", accountID)
 		}
@@ -215,43 +159,47 @@ func (p *Postgres) CreateTransfer(ctx context.Context, transfer domain.Transfer)
 		return domain.Transfer{}, domain.ErrInsufficientFunds
 	}
 
-	err = tx.QueryRowContext(ctx, `
-		INSERT INTO transfers (external_id, debit_account_id, credit_account_id, amount)
-		VALUES ($1, $2, $3, $4)
-		RETURNING id, created_at`,
-		transfer.ExternalID, transfer.DebitAccountID, transfer.CreditAccountID, transfer.Amount,
-	).Scan(&transfer.ID, &transfer.CreatedAt)
+	row, err := queries.InsertTransfer(ctx, sqlcdb.InsertTransferParams{
+		ExternalID:      transfer.ExternalID,
+		DebitAccountID:  int32(transfer.DebitAccountID),
+		CreditAccountID: int32(transfer.CreditAccountID),
+		Amount:          transfer.Amount,
+	})
 	if err != nil {
 		if isUniqueViolation(err) {
 			return domain.Transfer{}, domain.ErrConflict
 		}
 		return domain.Transfer{}, fmt.Errorf("insert transfer: %w", err)
 	}
+	transfer = transferFromRow(row)
 
-	entries := []struct {
-		accountID int64
-		debit     bool
-	}{
-		{accountID: transfer.DebitAccountID, debit: true},
-		{accountID: transfer.CreditAccountID, debit: false},
+	entries := []sqlcdb.InsertEntryParams{
+		{
+			AccountID:  int32(transfer.DebitAccountID),
+			TransferID: int32(transfer.ID),
+			Amount:     transfer.Amount,
+			Debit:      true,
+		},
+		{
+			AccountID:  int32(transfer.CreditAccountID),
+			TransferID: int32(transfer.ID),
+			Amount:     transfer.Amount,
+			Debit:      false,
+		},
 	}
 	for _, entry := range entries {
-		if _, err := tx.ExecContext(ctx, `
-			INSERT INTO entries (account_id, transfer_id, amount, debit)
-			VALUES ($1, $2, $3, $4)`,
-			entry.accountID, transfer.ID, transfer.Amount, entry.debit,
-		); err != nil {
+		if err := queries.InsertEntry(ctx, entry); err != nil {
 			return domain.Transfer{}, fmt.Errorf("insert transfer entry: %w", err)
 		}
 	}
 
 	if tracked[transfer.DebitAccountID] {
-		if err := insertBalance(ctx, tx, transfer.DebitAccountID, balances[transfer.DebitAccountID]-transfer.Amount); err != nil {
+		if err := insertBalance(ctx, queries, transfer.DebitAccountID, balances[transfer.DebitAccountID]-transfer.Amount); err != nil {
 			return domain.Transfer{}, err
 		}
 	}
 	if tracked[transfer.CreditAccountID] {
-		if err := insertBalance(ctx, tx, transfer.CreditAccountID, balances[transfer.CreditAccountID]+transfer.Amount); err != nil {
+		if err := insertBalance(ctx, queries, transfer.CreditAccountID, balances[transfer.CreditAccountID]+transfer.Amount); err != nil {
 			return domain.Transfer{}, err
 		}
 	}
@@ -263,51 +211,55 @@ func (p *Postgres) CreateTransfer(ctx context.Context, transfer domain.Transfer)
 }
 
 func (p *Postgres) ListAccountBalances(ctx context.Context) ([]domain.AccountBalance, error) {
-	rows, err := p.db.QueryContext(ctx, `
-		SELECT id, account_id, running_balance, created_at
-		FROM account_balances
-		ORDER BY account_id ASC, id ASC`)
+	rows, err := p.queries.ListAccountBalances(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("list account balances: %w", err)
 	}
-	defer rows.Close()
-
-	balances := make([]domain.AccountBalance, 0)
-	for rows.Next() {
-		var balance domain.AccountBalance
-		if err := rows.Scan(&balance.ID, &balance.AccountID, &balance.RunningBalance, &balance.CreatedAt); err != nil {
-			return nil, fmt.Errorf("scan account balance: %w", err)
-		}
-		balances = append(balances, balance)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate account balances: %w", err)
+	balances := make([]domain.AccountBalance, 0, len(rows))
+	for _, row := range rows {
+		balances = append(balances, domain.AccountBalance{
+			ID:             int64(row.ID),
+			AccountID:      int64(row.AccountID),
+			RunningBalance: row.RunningBalance,
+			CreatedAt:      row.CreatedAt,
+		})
 	}
 	return balances, nil
 }
 
-type scanner interface {
-	Scan(dest ...any) error
-}
-
-func scanAccount(row scanner) (domain.Account, error) {
-	var account domain.Account
-	var currentBalance sql.NullInt64
-	if err := row.Scan(
-		&account.ID, &account.ExternalID, &account.TrackBalance, &account.CreatedAt, &currentBalance,
-	); err != nil {
-		return domain.Account{}, err
+func accountFromRow(id int32, externalID string, trackBalance bool, createdAt time.Time, balance int64, hasBalanceSnapshot bool) (domain.Account, error) {
+	if trackBalance && !hasBalanceSnapshot {
+		return domain.Account{}, fmt.Errorf("tracked account %d has no balance snapshot", id)
 	}
-	if account.TrackBalance && currentBalance.Valid {
-		account.CurrentBalance = &currentBalance.Int64
+	account := domain.Account{
+		ID:           int64(id),
+		ExternalID:   externalID,
+		TrackBalance: trackBalance,
+		CreatedAt:    createdAt,
+	}
+	if trackBalance {
+		value := balance
+		account.CurrentBalance = &value
 	}
 	return account, nil
 }
 
-func insertBalance(ctx context.Context, tx *sql.Tx, accountID, balance int64) error {
-	if _, err := tx.ExecContext(ctx, `
-		INSERT INTO account_balances (account_id, running_balance)
-		VALUES ($1, $2)`, accountID, balance); err != nil {
+func transferFromRow(row sqlcdb.Transfer) domain.Transfer {
+	return domain.Transfer{
+		ID:              int64(row.ID),
+		ExternalID:      row.ExternalID,
+		DebitAccountID:  int64(row.DebitAccountID),
+		CreditAccountID: int64(row.CreditAccountID),
+		Amount:          row.Amount,
+		CreatedAt:       row.CreatedAt,
+	}
+}
+
+func insertBalance(ctx context.Context, queries *sqlcdb.Queries, accountID, balance int64) error {
+	if err := queries.InsertAccountBalance(ctx, sqlcdb.InsertAccountBalanceParams{
+		AccountID:      int32(accountID),
+		RunningBalance: balance,
+	}); err != nil {
 		return fmt.Errorf("insert account balance snapshot: %w", err)
 	}
 	return nil
