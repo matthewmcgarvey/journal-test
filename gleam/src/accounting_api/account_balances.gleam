@@ -1,6 +1,6 @@
+import accounting_api/account_balances_repository
 import accounting_api/http as api_http
 import accounting_api/model
-import accounting_api/repository
 import gleam/http.{Get}
 import gleam/json
 import pog
@@ -18,7 +18,7 @@ pub fn handle(
 }
 
 fn index(connection: pog.Connection) -> wisp.Response {
-  case repository.account_balances(connection) {
+  case account_balances_repository.account_balances(connection) {
     Ok(balances) ->
       api_http.json_response(
         200,
