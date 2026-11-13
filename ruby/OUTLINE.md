@@ -2,9 +2,16 @@
 
 ## Service
 
-Build a Ruby on Rails API-only service backed by PostgreSQL. The PostgreSQL instance must be built from a Dockerfile in this project; provide a Compose configuration to run it locally.
+Build a Ruby on Rails API-only service backed by PostgreSQL. The PostgreSQL instance must be built from a Dockerfile in this project; provide a Compose configuration to run it locally with a persistent data volume, configurable credentials, and a configurable host port (default `5432`). Local defaults are for development only.
 
 The service journals financial transfers. Its API returns JSON. Monetary values are integer cents (for example, `$10.99` is `1099`).
+
+Use `/api/v1` as the API prefix:
+- Accounts: `/api/v1/accounts`
+- Transfers: `/api/v1/transfers`
+- Account balances: `/api/v1/account_balances`
+
+Create requests wrap fields in an `account` or `transfer` JSON object, respectively.
 
 ## Account
 
@@ -18,7 +25,7 @@ Fields:
 
 API actions: `index`, `show`, `create`
 
-`track_balance` defaults to `true`. Accounts created with `track_balance=true` start with a $0 balance. Account index and show responses include `track_balance` and the current balance for tracked accounts; the balance is `null` for untracked accounts. Account records are immutable.
+`track_balance` defaults to `true`. Accounts created with `track_balance=true` start with a $0 balance. Account index and show responses include `track_balance` and `current_balance` in integer cents for tracked accounts; `current_balance` is `null` for untracked accounts. Account records are immutable.
 
 ## Transfer
 
@@ -37,6 +44,8 @@ Fields:
 API actions: `index`, `show`, `create`
 
 Creating a transfer stores the Transfer and creates two immutable Entries: a debit entry for the debit account and a credit entry for the credit account. It also creates a new Account Balance snapshot for each affected account with `track_balance=true`. No balance snapshot is created for untracked accounts. All writes must succeed or fail together.
+
+Transfer responses include the transfer's fields but do not expose its Entries.
 
 ## Entry
 
@@ -77,6 +86,9 @@ The current balance is the snapshot with the highest ID for the account. The Acc
 - All records are immutable. Do not provide update or delete API actions, and prevent record mutation.
 - Enforce required fields, unique external IDs, valid account and transfer references, and positive transfer and entry amounts.
 
-## Open question
+## Request errors
 
-None.
+- Invalid input and insufficient balance on a tracked debit account return a JSON `422` response.
+- A request missing its required `account` or `transfer` object returns JSON `400`.
+- Lookups for missing account or transfer records return JSON `404`.
+- A unique-ID conflict detected during a concurrent create returns JSON `409`.
