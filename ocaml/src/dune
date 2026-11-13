@@ -1,0 +1,10 @@
+(library
+ (name journal)
+ (public_name journal_ocaml)
+ (libraries
+  dream
+  caqti-lwt.unix
+  caqti.classic
+  caqti-driver-postgresql
+  yojson
+  uri))

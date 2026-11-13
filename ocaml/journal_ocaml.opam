@@ -1,0 +1,18 @@
+opam-version: "2.0"
+name: "journal_ocaml"
+version: "0.1.0"
+synopsis: "PostgreSQL-backed financial journal API"
+depends: [
+  "ocaml" {>= "5.3"}
+  "dune" {>= "3.17"}
+  "dream"
+  "caqti-lwt"
+  "caqti-driver-postgresql"
+  "yojson"
+  "uri"
+  "alcotest" {with-test}
+  "ocamlformat" {with-dev-setup}
+]
+build: [
+  ["dune" "build" "-p" name "-j" jobs]
+]

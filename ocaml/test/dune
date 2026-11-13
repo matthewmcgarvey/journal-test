@@ -1,0 +1,14 @@
+(test
+ (name validation_test)
+ (libraries journal alcotest))
+
+(test
+ (name integration_test)
+ (libraries journal alcotest lwt.unix)
+ (deps
+  (source_tree ../migrations))
+ (action
+  (setenv
+   MIGRATIONS_DIR
+   %{workspace_root}/migrations
+   (run %{test}))))

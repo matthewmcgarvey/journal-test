@@ -1,0 +1,9 @@
+(executable
+ (name server_main)
+ (public_name journal-server)
+ (libraries journal lwt.unix))
+
+(executable
+ (name migrate_main)
+ (public_name journal-migrate)
+ (libraries journal lwt.unix))
