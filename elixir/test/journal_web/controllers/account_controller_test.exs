@@ -1,6 +1,9 @@
 defmodule JournalWeb.AccountControllerTest do
   use JournalWeb.ConnCase, async: true
 
+  alias Journal.Accounting.Account
+  alias Journal.Repo
+
   test "creates tracked and untracked accounts with the correct balance", %{conn: conn} do
     tracked = create_account(conn, "tracked", true)
     untracked = create_account(conn, "untracked", false)
@@ -46,6 +49,19 @@ defmodule JournalWeb.AccountControllerTest do
              conn
              |> json_post(~p"/api/v1/accounts", %{account: %{external_id: "duplicate"}})
              |> json_response(409)
+  end
+
+  test "the database rejects account updates", %{conn: conn} do
+    account = create_account(conn, "immutable", true)
+
+    assert_raise Postgrex.Error, fn ->
+      Repo.query!("UPDATE accounts SET external_id = $1 WHERE id = $2", [
+        "changed",
+        account["id"]
+      ])
+    end
+
+    assert %Account{external_id: "immutable"} = Repo.get!(Account, account["id"])
   end
 
   defp create_account(conn, external_id, track_balance) do

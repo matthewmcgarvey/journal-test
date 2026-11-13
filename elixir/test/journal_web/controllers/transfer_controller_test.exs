@@ -103,6 +103,25 @@ defmodule JournalWeb.TransferControllerTest do
              |> json_response(400)
   end
 
+  test "reports a duplicate transfer external ID as a conflict", %{conn: conn} do
+    source = create_account(conn, "duplicate-source", false)
+    destination = create_account(conn, "duplicate-destination", true)
+
+    attrs = %{
+      external_id: "duplicate-transfer",
+      debit_account_id: source["id"],
+      credit_account_id: destination["id"],
+      amount: 1
+    }
+
+    assert {:ok, _transfer} = Accounting.create_transfer(attrs)
+
+    assert %{"errors" => _} =
+             conn
+             |> json_post(~p"/api/v1/transfers", %{transfer: attrs})
+             |> json_response(409)
+  end
+
   test "returns transfer index and show without exposing entries", %{conn: conn} do
     source = create_account(conn, "index-source", false)
     destination = create_account(conn, "index-destination", true)

@@ -13,6 +13,7 @@ defmodule Journal.Accounting.AccountBalance do
     account_balance
     |> cast(attrs, [:account_id, :running_balance])
     |> validate_required([:account_id, :running_balance])
+    |> validate_number(:running_balance, greater_than_or_equal_to: 0)
     |> foreign_key_constraint(:account_id)
   end
 end
