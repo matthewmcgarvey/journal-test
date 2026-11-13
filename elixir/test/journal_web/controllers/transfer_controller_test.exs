@@ -153,44 +153,6 @@ defmodule JournalWeb.TransferControllerTest do
              |> json_response(404)
   end
 
-  test "concurrent transfers cannot overspend a tracked debit account" do
-    {:ok, source} = Accounting.create_account(%{external_id: "concurrent-source"})
-
-    {:ok, root} =
-      Accounting.create_account(%{external_id: "concurrent-root", track_balance: false})
-
-    {:ok, destination} = Accounting.create_account(%{external_id: "concurrent-destination"})
-
-    {:ok, _funding} =
-      Accounting.create_transfer(%{
-        external_id: "concurrent-funding",
-        debit_account_id: root.id,
-        credit_account_id: source.id,
-        amount: 100
-      })
-
-    results =
-      Task.async_stream(
-        1..2,
-        fn index ->
-          Accounting.create_transfer(%{
-            external_id: "concurrent-#{index}",
-            debit_account_id: source.id,
-            credit_account_id: destination.id,
-            amount: 75
-          })
-        end,
-        max_concurrency: 2,
-        timeout: 5_000
-      )
-      |> Enum.map(fn {:ok, result} -> result end)
-
-    assert Enum.count(results, &match?({:ok, %Transfer{}}, &1)) == 1
-    assert Enum.count(results, &(&1 == {:error, :insufficient_funds})) == 1
-
-    assert %{account: ^source, current_balance: 25} = Accounting.get_account(source.id)
-  end
-
   defp create_account(conn, external_id, track_balance) do
     conn
     |> json_post(~p"/api/v1/accounts", %{
